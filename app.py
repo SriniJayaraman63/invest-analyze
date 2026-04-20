@@ -290,6 +290,46 @@ def _record_request():
     st.session_state._last_req_ts  = time.time()
 
 
+def _is_rate_limit(e: Exception) -> bool:
+    """Return True if the exception is a Yahoo Finance rate-limit response."""
+    msg = str(e).lower()
+    return any(k in msg for k in ("too many requests", "rate limit", "429", "rateerror"))
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_all(ticker: str) -> dict:
+    """
+    Fetch all metrics for a ticker from yfinance and cache for 10 minutes.
+    Raises RuntimeError on rate-limit; raises ValueError if ticker has no price data.
+    """
+    try:
+        az = StockAnalyzer(ticker)
+        pd_ = az.get_price_data()
+        if not pd_.get("current_price"):
+            raise ValueError(f"No price data found for **{ticker}**. Check the symbol.")
+        return {
+            "overview": az.get_company_overview(),
+            "price":    pd_,
+            "val":      az.get_valuation_metrics(),
+            "prof":     az.get_profitability_metrics(),
+            "health":   az.get_financial_health(),
+            "growth":   az.get_growth_metrics(),
+            "div":      az.get_dividend_info(),
+            "tech":     az.get_technical_indicators(),
+            "analyst":  az.get_analyst_info(),
+            "hist":     az.history,
+        }
+    except (ValueError, RuntimeError):
+        raise
+    except Exception as e:
+        if _is_rate_limit(e):
+            raise RuntimeError(
+                "Yahoo Finance is temporarily rate-limiting requests from this server. "
+                "Wait 30–60 seconds and try again."
+            ) from e
+        raise
+
+
 # ─── Format helpers ───────────────────────────────────────────────────────────
 
 def _fv(val, spec=".2f", prefix="", suffix="", na="—"):
@@ -786,24 +826,25 @@ def render_comparison(tickers_input):
     for idx, ticker in enumerate(tickers):
         progress.progress((idx + 1) / len(tickers), text=f"Loading {ticker}…")
         try:
-            az = StockAnalyzer(ticker)
-            pd_ = az.get_price_data()
-            if not pd_.get("current_price"):
-                st.error(f"Could not fetch data for **{ticker}**. Skipping.")
-                continue
+            data = _fetch_all(ticker)
             all_data[ticker] = {
-                "val":    az.get_valuation_metrics(),
-                "prof":   az.get_profitability_metrics(),
-                "health": az.get_financial_health(),
-                "growth": az.get_growth_metrics(),
-                "div":    az.get_dividend_info(),
-                "tech":   az.get_technical_indicators(),
+                "val":    data["val"],
+                "prof":   data["prof"],
+                "health": data["health"],
+                "growth": data["growth"],
+                "div":    data["div"],
+                "tech":   data["tech"],
             }
-            names.append(az.get_company_overview()["name"].split()[0])  # short name
-            price_data[ticker] = pd_
-            hists[ticker]      = az.history
+            names.append(data["overview"]["name"].split()[0])
+            price_data[ticker] = data["price"]
+            hists[ticker]      = data["hist"]
+        except RuntimeError as e:
+            st.error(str(e))
+            return
+        except ValueError as e:
+            st.warning(f"Skipping {ticker}: {e}")
         except Exception as e:
-            st.error(f"Error loading {ticker}: {e}")
+            st.warning(f"Could not load {ticker}: {e}")
     progress.empty()
 
     tickers = [t for t in tickers if t in all_data]
@@ -926,23 +967,27 @@ def render_single(ticker_input):
     ticker = ticker_input.strip().upper()
     with st.spinner(f"Loading {ticker} …"):
         try:
-            az = StockAnalyzer(ticker)
-            ov = az.get_company_overview()
-            pd_ = az.get_price_data()
-            val_m    = az.get_valuation_metrics()
-            prof_m   = az.get_profitability_metrics()
-            health_m = az.get_financial_health()
-            growth_m = az.get_growth_metrics()
-            div_m    = az.get_dividend_info()
-            tech_m   = az.get_technical_indicators()
-            analyst_m= az.get_analyst_info()
-            hist     = az.history
-            if not pd_.get("current_price"):
-                st.error(f"No data found for **{ticker}**. Check the symbol.")
-                return
-        except Exception as e:
-            st.error(f"Error: {e}")
+            data     = _fetch_all(ticker)
+        except RuntimeError as e:
+            st.error(str(e))
             return
+        except ValueError as e:
+            st.error(str(e))
+            return
+        except Exception as e:
+            st.error(f"Unexpected error loading {ticker}: {e}")
+            return
+
+    ov       = data["overview"]
+    pd_      = data["price"]
+    val_m    = data["val"]
+    prof_m   = data["prof"]
+    health_m = data["health"]
+    growth_m = data["growth"]
+    div_m    = data["div"]
+    tech_m   = data["tech"]
+    analyst_m= data["analyst"]
+    hist     = data["hist"]
 
     cur   = pd_["current_price"]
     chg   = pd_.get("day_change")
