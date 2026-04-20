@@ -6,7 +6,7 @@ Run: streamlit run app.py
 """
 
 from __future__ import annotations
-import math, warnings
+import math, re, time, warnings
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -244,6 +244,50 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ─── Rate limiting + input validation ────────────────────────────────────────
+
+_MAX_PER_SESSION = 20           # max analyses per browser session
+_COOLDOWN_SECS   = 3            # minimum seconds between consecutive requests
+_TICKER_RE       = re.compile(r'^[A-Z0-9.\-\^]{1,12}$')
+
+
+def _init_session():
+    if "_req_count" not in st.session_state:
+        st.session_state._req_count    = 0
+    if "_last_req_ts" not in st.session_state:
+        st.session_state._last_req_ts  = 0.0
+
+
+def _sanitize_ticker(raw: str):
+    """Return cleaned ticker string, or None if the input looks invalid."""
+    t = raw.strip().upper()
+    if not t or not _TICKER_RE.match(t):
+        return None
+    return t
+
+
+def _rate_limit_ok() -> bool:
+    """Check per-session quota and cooldown. Shows an error and returns False if blocked."""
+    remaining = _MAX_PER_SESSION - st.session_state._req_count
+    if remaining <= 0:
+        st.error(
+            f"Session limit reached ({_MAX_PER_SESSION} analyses). "
+            "Refresh the page to start a new session."
+        )
+        return False
+    elapsed = time.time() - st.session_state._last_req_ts
+    if elapsed < _COOLDOWN_SECS:
+        wait = math.ceil(_COOLDOWN_SECS - elapsed)
+        st.warning(f"Please wait {wait}s before running another analysis.")
+        return False
+    return True
+
+
+def _record_request():
+    st.session_state._req_count   += 1
+    st.session_state._last_req_ts  = time.time()
 
 
 # ─── Format helpers ───────────────────────────────────────────────────────────
@@ -1192,11 +1236,20 @@ def _sidebar():
         go_btn = st.button(btn_label, use_container_width=True, type="primary")
 
         st.markdown("---")
-        st.markdown("""
+        used      = st.session_state.get("_req_count", 0)
+        remaining = max(0, _MAX_PER_SESSION - used)
+        bar_pct   = int(remaining / _MAX_PER_SESSION * 100)
+        bar_color = "#22c55e" if remaining > 8 else ("#f59e0b" if remaining > 3 else "#ef4444")
+        st.markdown(f"""
         <div style="font-size:.68em;color:#4a6080;line-height:1.6">
         <b style="color:#8899bb">About this tool</b><br>
         Professional-grade metrics explained in plain English. Data via Yahoo Finance.
-        Not financial advice.
+        Not financial advice.<br><br>
+        <b style="color:#8899bb">Session usage</b><br>
+        <div style="background:#0a1f3d;border-radius:4px;height:5px;margin:4px 0 2px">
+          <div style="background:{bar_color};width:{bar_pct}%;height:5px;border-radius:4px"></div>
+        </div>
+        {remaining} of {_MAX_PER_SESSION} analyses remaining
         </div>""", unsafe_allow_html=True)
 
     return mode, tickers_out, go_btn
@@ -1307,11 +1360,30 @@ def render_portfolio_builder():
     if not submitted:
         return
 
-    # ── Run optimisation ──────────────────────────────────────────────────────
-    raw_tickers = [t.strip().upper() for t in ticker_fields if t.strip()]
+    # ── Validate + rate-limit ─────────────────────────────────────────────────
+    raw_tickers = []
+    bad_inputs  = []
+    for t in ticker_fields:
+        if not t.strip():
+            continue
+        cleaned = _sanitize_ticker(t)
+        if cleaned is None:
+            bad_inputs.append(t.strip())
+        else:
+            raw_tickers.append(cleaned)
+
+    if bad_inputs:
+        st.error(f"Invalid ticker symbol(s): {', '.join(bad_inputs)}. "
+                 "Use standard exchange symbols (letters, numbers, dots, hyphens — max 12 chars).")
+        return
+
     if len(raw_tickers) < 2:
         st.error("Enter at least 2 ETF tickers to build a portfolio.")
         return
+
+    if not _rate_limit_ok():
+        return
+    _record_request()
 
     optimizer = ETFPortfolioOptimizer(raw_tickers, risk_profile, time_horizon)
 
@@ -1691,6 +1763,7 @@ def render_portfolio_builder():
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 def main():
+    _init_session()
     mode, tickers, go_btn = _sidebar()
 
     # Portfolio Builder is self-contained (own form + button inside)
@@ -1743,10 +1816,23 @@ def main():
         </div>""", unsafe_allow_html=True)
         return
 
+    # Sanitize ticker inputs
+    clean = [_sanitize_ticker(t) for t in tickers]
+    bad   = [t for t, c in zip(tickers, clean) if c is None and t.strip()]
+    if bad:
+        st.error(f"Invalid ticker symbol(s): {', '.join(bad)}. "
+                 "Use standard US exchange symbols (letters, numbers, dots, hyphens — max 12 chars).")
+        return
+    clean = [c for c in clean if c]
+
+    if not _rate_limit_ok():
+        return
+    _record_request()
+
     if "Deep Dive" in mode:
-        render_single(tickers[0])
+        render_single(clean[0])
     elif "Compare" in mode:
-        render_comparison(tickers)
+        render_comparison(clean)
 
 
 if __name__ == "__main__":
