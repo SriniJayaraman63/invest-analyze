@@ -38,16 +38,18 @@ LOOKBACK = {
 # vol_cap: annualised portfolio volatility ceiling; varies by horizon (Q/H/A)
 PROFILE_CFG = {
     "Conservative": {
-        "max_w":   0.25,
-        "min_w":   0.03,
-        "obj":     "min_vol",          # minimise portfolio volatility
+        "max_w":      0.25,
+        "max_w_cash": 0.40,            # higher cap for cash/stable-fund ETFs
+        "min_w":      0.03,
+        "obj":        "min_vol",       # minimise portfolio volatility
         "vol_cap": {"Quarterly": 0.07, "Half-Yearly": 0.09, "Annual": 0.11},
         "icon":    "🛡️",
         "color":   "#0d7c4e",
         "desc": (
             "Prioritises capital preservation and income. "
             "Minimises portfolio volatility — expense ratio and drawdown are primary constraints. "
-            "Max 25 % per ETF. "
+            "Cash/stable ETFs (SGOV, BIL, SHV, JPST) may receive up to 40 % allocation. "
+            "All other ETFs capped at 25 %. "
             "Quarterly horizon applies the tightest volatility cap (7 %)."
         ),
     },
@@ -79,6 +81,23 @@ PROFILE_CFG = {
             "Max 55 % per ETF."
         ),
     },
+}
+
+# ── Known cash / ultra-short / stable-fund ETFs ───────────────────────────────
+# These receive capital-preservation-specific rationale language.
+CASH_STABLE_ETFS = {
+    "SGOV",  # iShares 0-3 Month Treasury Bond
+    "BIL",   # SPDR Bloomberg 1-3 Month T-Bill
+    "SHV",   # iShares Short Treasury Bond (1-12M)
+    "TBIL",  # US Treasury 3 Month Bill
+    "USFR",  # WisdomTree Floating Rate Treasury
+    "JPST",  # JPMorgan Ultra-Short Income
+    "MINT",  # PIMCO Enhanced Short Maturity
+    "ICSH",  # iShares Ultra Short-Term Bond
+    "NEAR",  # iShares Short Maturity Bond
+    "FLOT",  # iShares Floating Rate Bond
+    "CLTL",  # Invesco Treasury Collateral ETF
+    "GSY",   # Invesco Ultra Short Duration
 }
 
 # ── Colour palette for allocation chart ───────────────────────────────────────
@@ -274,7 +293,11 @@ class ETFPortfolioOptimizer:
         obj_fn = obj_map[cfg["obj"]]
 
         eq_w   = np.ones(n) / n
-        bounds = [(cfg["min_w"], cfg["max_w"])] * n
+        max_w_cash = cfg.get("max_w_cash", cfg["max_w"])
+        bounds = [
+            (cfg["min_w"], max_w_cash if t in CASH_STABLE_ETFS else cfg["max_w"])
+            for t in valid
+        ]
         cons   = [
             {"type": "eq",   "fun": lambda w: np.sum(w) - 1.0},
             {"type": "ineq", "fun": lambda w: vol_cap - p_vol(w)},
@@ -366,6 +389,41 @@ class ETFPortfolioOptimizer:
         cal = m["calmar"]
 
         drivers = []
+
+        # ── Cash / stable fund: bespoke rationale ────────────────────────────
+        if ticker in CASH_STABLE_ETFS:
+            drivers.append(
+                f"cash-equivalent / ultra-short duration fund — "
+                f"acts as a capital-preservation anchor and liquidity buffer"
+            )
+            if m["div_yield"] > 0:
+                drivers.append(
+                    f"currently yielding <b>{m['div_yield']*100:.2f}%</b> "
+                    f"with near-zero interest-rate risk"
+                )
+            if abs(dd) < 0.05:
+                drivers.append(
+                    f"minimal drawdown risk (<b>{dd*100:.2f}%</b> max) — "
+                    f"provides a stable floor under adverse market conditions"
+                )
+            exp = m["expense_ratio"] or 0.0
+            if exp > 0:
+                drivers.append(f"low expense ratio <b>{exp*100:.3f}%</b>")
+
+            if pct >= 20:
+                tier = f"<b>Core preservation holding ({pct:.1f}%)</b>"
+            elif pct >= 10:
+                tier = f"<b>Significant cash allocation ({pct:.1f}%)</b>"
+            elif pct >= 4:
+                tier = f"<b>Liquidity buffer ({pct:.1f}%)</b>"
+            elif pct > 0:
+                tier = f"<b>Nominal cash position ({pct:.1f}%)</b>"
+            else:
+                tier = "<b>Zero weight</b>"
+
+            return tier + ": " + " &nbsp;·&nbsp; ".join(drivers[:4]) + "."
+
+        # ── Standard ETF rationale ────────────────────────────────────────────
 
         # Return quality
         if sh > 1.2:

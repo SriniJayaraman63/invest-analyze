@@ -1337,12 +1337,22 @@ def render_portfolio_builder():
 
         cols5 = st.columns(5)
         ticker_fields = []
-        defaults = ["SPY","QQQ","AGG","GLD","VNQ","SCHD","TLT","IEMG","VIG","XLE"]
+        # SGOV (0-3 Month T-Bill) included as a cash/capital-preservation anchor
+        defaults = ["SPY","QQQ","AGG","SGOV","GLD","VNQ","SCHD","TLT","IEMG","VIG"]
         for i in range(10):
             with cols5[i % 5]:
                 t = st.text_input(f"ETF {i+1}", value=defaults[i] if i < len(defaults) else "",
                                   key=f"pb_etf_{i}", label_visibility="visible")
                 ticker_fields.append(t)
+
+        st.markdown("""
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;
+                    padding:10px 14px;font-size:.76em;color:#166534;margin-top:4px">
+          <b>Cash / Stable Fund:</b> SGOV (iShares 0-3 Month T-Bill ETF) is included as a
+          capital-preservation anchor — near-zero duration, ~5% yield, minimal drawdown risk.
+          Especially impactful for <b>Conservative</b> profiles. Replace with BIL, SHV, JPST, or MINT
+          for alternatives.
+        </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
