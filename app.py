@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore")
 from stock_analyzer import StockAnalyzer, fmt_large
 import interpretations as interp
 from portfolio_builder import ETFPortfolioOptimizer, PROFILE_CFG, ALLOC_COLORS, SCIPY_AVAILABLE
+from tax_optimizer import TaxOptimizer, LIMITS, STANDARD_DEDUCTIONS, TAX_BRACKETS
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -1229,7 +1230,8 @@ def _sidebar():
             "Mode",
             ["🔍  Deep Dive — Single Stock",
              "⚖️  Compare Stocks",
-             "🏗️  Portfolio Builder"],
+             "🏗️  Portfolio Builder",
+             "💰  Tax Optimizer"],
             label_visibility="collapsed",
         )
 
@@ -1276,8 +1278,27 @@ def _sidebar():
                 '</div>',
                 unsafe_allow_html=True)
 
+        if "Tax" in mode:
+            st.markdown(
+                '<div style="font-size:.78em;color:#8899bb;line-height:1.6">'
+                'Enter your W-2 data and current tax-advantaged contributions '
+                'to receive personalised federal tax-saving recommendations.</div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                '<div style="border:1.5px dashed #1e3d6e;border-radius:8px;padding:12px;'
+                'text-align:center;font-size:.75em;color:#c9a240;margin-top:8px">'
+                '💰 Tax Optimizer<br>'
+                '<span style="color:#8899bb">Enter W-2 details in the main panel →</span>'
+                '</div>',
+                unsafe_allow_html=True)
+
         st.markdown("&nbsp;", unsafe_allow_html=True)
-        btn_label = "▶  Analyze" if "Portfolio" not in mode else "▶  Open Builder"
+        if "Portfolio" in mode:
+            btn_label = "▶  Open Builder"
+        elif "Tax" in mode:
+            btn_label = "▶  Open Tax Optimizer"
+        else:
+            btn_label = "▶  Analyze"
         go_btn = st.button(btn_label, use_container_width=True, type="primary")
 
         st.markdown("---")
@@ -1815,15 +1836,442 @@ def render_portfolio_builder():
     </div>""", unsafe_allow_html=True)
 
 
+# ─── Tax Optimizer ───────────────────────────────────────────────────────────
+
+def render_tax_optimizer():
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#00194e 0%,#003087 100%);
+                border-radius:12px;padding:22px 28px;color:white;margin-bottom:24px;">
+      <div style="font-size:.65em;letter-spacing:2.5px;text-transform:uppercase;
+                  color:#c9a240;font-weight:700;margin-bottom:6px;">
+        FEDERAL TAX OPTIMIZATION · TAX YEAR 2025 · IRS Rev. Proc. 2024-40
+      </div>
+      <div style="font-size:1.5em;font-weight:800;">Tax Optimizer</div>
+      <div style="font-size:.85em;opacity:.8;margin-top:6px;">
+        Enter your W-2 data and current tax-advantaged account usage.
+        Receive ranked, actionable recommendations with estimated federal tax savings.
+        No personal information (name, SSN, employer) is required or stored.
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Input form ────────────────────────────────────────────────────────────
+    with st.form("tax_form"):
+
+        # Section A — W-2 & Household
+        st.markdown("#### W-2 Information & Household")
+        st.caption("Enter figures from your most recent W-2. For married filing jointly, enter combined figures where indicated.")
+
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            w2_box1      = st.number_input("W-2 Box 1 — Wages (primary)", min_value=0.0,
+                                            value=150_000.0, step=1_000.0, format="%.0f",
+                                            help="Wages, Tips, Other Compensation (after pre-tax 401k/HSA deductions)")
+            w2_box12_ret = st.number_input("Box 12 — Retirement contributions (D/E/S)",
+                                            min_value=0.0, value=10_000.0, step=500.0, format="%.0f",
+                                            help="Code D=401k, E=403b, S=SIMPLE IRA. Current annual contribution.")
+        with a2:
+            w2_box2      = st.number_input("W-2 Box 2 — Federal tax withheld", min_value=0.0,
+                                            value=30_000.0, step=500.0, format="%.0f")
+            w2_box12_hsa = st.number_input("Box 12 W — HSA (employer + payroll)",
+                                            min_value=0.0, value=0.0, step=100.0, format="%.0f",
+                                            help="Total HSA contributions via payroll (employer + employee, Code W)")
+        with a3:
+            filing_status = st.selectbox("Filing Status",
+                ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"],
+                index=1)
+            age = st.number_input("Your Age", min_value=18, max_value=99, value=42, step=1)
+
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            spouse_w2    = st.number_input("Spouse W-2 Box 1 (if MFJ)", min_value=0.0,
+                                            value=0.0, step=1_000.0, format="%.0f")
+            spouse_age   = st.number_input("Spouse Age (if MFJ)", min_value=0, max_value=99, value=0, step=1)
+        with b2:
+            num_dep      = st.number_input("Number of Dependents", min_value=0, max_value=10, value=2, step=1)
+            plan_type    = st.selectbox("Employer Retirement Plan Type",
+                                        ["401(k)", "403(b)", "SIMPLE IRA", "None"])
+        with b3:
+            has_workplace = plan_type != "None"
+            st.markdown("<br>", unsafe_allow_html=True)
+            has_hdhp     = st.checkbox("Enrolled in High-Deductible Health Plan (HDHP)",
+                                        value=False, help="Required for HSA eligibility")
+            hsa_coverage = st.selectbox("HSA Coverage Type",
+                                        ["None", "Self", "Family"],
+                                        index=0 if not has_hdhp else 2)
+
+        st.markdown("---")
+
+        # Section B — Current Tax-Advantaged Accounts
+        st.markdown("#### Current Tax-Advantaged Account Contributions (this year)")
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            cur_ira_trad = st.number_input("Traditional IRA", min_value=0.0, value=0.0,
+                                            step=500.0, format="%.0f")
+            cur_fsa_health = st.number_input("Healthcare FSA", min_value=0.0, value=0.0,
+                                              step=100.0, format="%.0f")
+        with c2:
+            cur_ira_roth = st.number_input("Roth IRA", min_value=0.0, value=0.0,
+                                            step=500.0, format="%.0f")
+            cur_fsa_dep  = st.number_input("Dependent Care FSA", min_value=0.0, value=0.0,
+                                            step=100.0, format="%.0f")
+        with c3:
+            cur_hsa_self = st.number_input("HSA (outside payroll)", min_value=0.0,
+                                            value=0.0, step=100.0, format="%.0f")
+            cur_529      = st.number_input("529 Education (this year)", min_value=0.0,
+                                            value=0.0, step=500.0, format="%.0f")
+        with c4:
+            invest_inc   = st.number_input("Investment Income (dividends + cap gains)",
+                                            min_value=0.0, value=0.0, step=500.0, format="%.0f")
+            other_inc    = st.number_input("Other Income (freelance, rental, etc.)",
+                                            min_value=0.0, value=0.0, step=500.0, format="%.0f")
+
+        st.markdown("---")
+
+        # Section C — Itemized Deductions
+        st.markdown("#### Itemized Deductions (leave 0 if not applicable)")
+
+        d1, d2, d3, d4 = st.columns(4)
+        with d1:
+            mortgage_int = st.number_input("Mortgage Interest Paid", min_value=0.0,
+                                            value=0.0, step=500.0, format="%.0f")
+        with d2:
+            char_cash    = st.number_input("Charitable Donations (cash)", min_value=0.0,
+                                            value=0.0, step=100.0, format="%.0f")
+            char_noncash = st.number_input("Charitable Donations (non-cash / appreciated)",
+                                            min_value=0.0, value=0.0, step=100.0, format="%.0f")
+        with d3:
+            state_taxes  = st.number_input("State & Local Taxes Paid (actual amount)",
+                                            min_value=0.0, value=0.0, step=500.0, format="%.0f",
+                                            help="Income + property taxes. Capped at $10,000 for federal deduction.")
+        with d4:
+            other_item   = st.number_input("Other Itemized (medical >7.5% AGI, etc.)",
+                                            min_value=0.0, value=0.0, step=100.0, format="%.0f")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        submitted = st.form_submit_button("Analyze & Generate Recommendations",
+                                          type="primary", use_container_width=True)
+
+    if not submitted:
+        # Show quick reference bracket card while waiting
+        st.markdown("---")
+        st.markdown("#### 2025 Federal Tax Brackets (Quick Reference)")
+        fs_ref = "Married Filing Jointly"
+        bracket_rows = []
+        prev = 0.0
+        for ceiling, rate in TAX_BRACKETS[fs_ref]:
+            top = f"${ceiling:,.0f}" if ceiling != float("inf") else "Over $751,600"
+            bracket_rows.append({
+                "Marginal Rate": f"{rate*100:.0f}%",
+                "MFJ Taxable Income": f"${prev:,.0f} – {top}",
+            })
+            prev = ceiling
+        st.dataframe(bracket_rows, use_container_width=True, hide_index=True)
+        st.markdown("""
+        <div class="disclaimer">
+        <b>Disclaimer:</b> This tool provides general educational information about federal tax
+        strategies. It does not constitute tax, legal, or financial advice. Tax laws are complex
+        and individual circumstances vary. Always consult a licensed CPA or tax advisor before
+        making tax-related decisions. Data sourced from IRS Rev. Proc. 2024-40 (2025 tax year).
+        </div>""", unsafe_allow_html=True)
+        return
+
+    # ── Build optimizer ───────────────────────────────────────────────────────
+    try:
+        optimizer = TaxOptimizer(
+            w2_box1=w2_box1,
+            w2_box2=w2_box2,
+            w2_box12_retirement=w2_box12_ret,
+            w2_box12_hsa=w2_box12_hsa,
+            filing_status=filing_status,
+            age=int(age),
+            spouse_age=int(spouse_age),
+            spouse_w2_box1=spouse_w2,
+            num_dependents=int(num_dep),
+            current_ira_trad=cur_ira_trad,
+            current_ira_roth=cur_ira_roth,
+            current_hsa_self=cur_hsa_self,
+            hsa_coverage=hsa_coverage,
+            current_fsa_health=cur_fsa_health,
+            current_fsa_dep=cur_fsa_dep,
+            current_529=cur_529,
+            investment_income=invest_inc,
+            other_income=other_inc,
+            mortgage_interest=mortgage_int,
+            charitable_cash=char_cash,
+            charitable_noncash=char_noncash,
+            state_local_taxes=state_taxes,
+            other_itemized=other_item,
+            has_workplace_plan=has_workplace,
+            plan_type=plan_type,
+            has_hdhp=has_hdhp,
+        )
+    except Exception as e:
+        st.error(f"Could not compute tax analysis: {e}")
+        return
+
+    cur  = optimizer.current_summary()
+    recs = optimizer.generate_recommendations()
+
+    # ── Current tax situation cards ───────────────────────────────────────────
+    st.markdown("### Current Tax Situation")
+
+    def _tax_card(label, value, sublabel="", color="#00194e"):
+        return (f'<div class="port-metric-card">'
+                f'<div class="pmc-label">{label}</div>'
+                f'<div class="pmc-value" style="color:{color}">{value}</div>'
+                f'<div class="pmc-sublabel">{sublabel}</div>'
+                f'</div>')
+
+    tc1, tc2, tc3, tc4, tc5, tc6 = st.columns(6)
+    with tc1:
+        st.markdown(_tax_card("Gross Income", f"${cur['gross_income']:,.0f}", "W-2 + other"), unsafe_allow_html=True)
+    with tc2:
+        st.markdown(_tax_card("Taxable Income", f"${cur['taxable_income']:,.0f}",
+                              f"After {cur['deduction_type']} deduction"), unsafe_allow_html=True)
+    with tc3:
+        st.markdown(_tax_card("Est. Federal Tax", f"${cur['federal_tax']:,.0f}",
+                              "Current liability", "#991b1b"), unsafe_allow_html=True)
+    with tc4:
+        refund = cur["refund_or_owe"]
+        label  = "Est. Refund" if refund >= 0 else "Est. Amount Owed"
+        color  = "#065f46" if refund >= 0 else "#991b1b"
+        st.markdown(_tax_card(label, f"${abs(refund):,.0f}", "vs. withholding", color), unsafe_allow_html=True)
+    with tc5:
+        st.markdown(_tax_card("Marginal Rate", f"{cur['marginal_rate']*100:.0f}%",
+                              "Top bracket"), unsafe_allow_html=True)
+    with tc6:
+        st.markdown(_tax_card("Effective Rate", f"{cur['effective_rate']*100:.1f}%",
+                              "Tax / gross income"), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if not recs:
+        st.success("No additional tax-saving opportunities identified based on your inputs. "
+                   "You appear to be maximizing available tax-advantaged vehicles.")
+        return
+
+    # ── Recommendation table ──────────────────────────────────────────────────
+    st.markdown("### Recommendations — Select to Apply")
+    st.caption(
+        "Toggle the **Apply** checkbox on each row to include or exclude a recommendation. "
+        "The savings summary updates automatically based on your selection. "
+        "Rows highlighted in green have the highest impact."
+    )
+
+    PRIORITY_COLOR = {"High": "#065f46", "Medium": "#1a56db", "Low": "#64748b"}
+    PRIORITY_BG    = {"High": "#d1fae5", "Medium": "#dbeafe", "Low": "#f1f5f9"}
+
+    # Build display dataframe
+    table_data = []
+    for r in recs:
+        table_data.append({
+            "Apply":                True,
+            "Priority":             r["priority"],
+            "Category":             r["category"],
+            "Strategy":             r["strategy"],
+            "Current ($)":          r["current"],
+            "Recommended ($)":      r["recommended"],
+            "Added Deduction ($)":  r["deduction"],
+            "Est. Federal Saving":  r["fed_saving"],
+            "FICA Saving":          r["fica_saving"],
+            "_id":                  r["id"],
+            "_detail":              r["detail"],
+            "_note":                r["note"],
+        })
+
+    df = pd.DataFrame(table_data)
+
+    edited = st.data_editor(
+        df.drop(columns=["_id", "_detail", "_note"]),
+        column_config={
+            "Apply": st.column_config.CheckboxColumn(
+                "Apply", default=True, width="small",
+                help="Toggle to include/exclude this recommendation"
+            ),
+            "Priority": st.column_config.TextColumn("Priority", width="small"),
+            "Category": st.column_config.TextColumn("Category", width="medium"),
+            "Strategy": st.column_config.TextColumn("Strategy", width="large"),
+            "Current ($)": st.column_config.NumberColumn(
+                "Current ($)", format="$%,.0f", width="small"),
+            "Recommended ($)": st.column_config.NumberColumn(
+                "Recommended ($)", format="$%,.0f", width="small"),
+            "Added Deduction ($)": st.column_config.NumberColumn(
+                "Added Deduction ($)", format="$%,.0f", width="small",
+                help="Additional pre-tax deduction from this action"),
+            "Est. Federal Saving": st.column_config.NumberColumn(
+                "Est. Fed. Saving ($)", format="$%,.0f", width="small"),
+            "FICA Saving": st.column_config.NumberColumn(
+                "FICA Saving ($)", format="$%,.0f", width="small",
+                help="Social Security + Medicare tax savings (payroll deduction strategies only)"),
+        },
+        use_container_width=True,
+        hide_index=True,
+        key="tax_rec_table",
+    )
+
+    # ── Per-item detail cards (selected items only) ───────────────────────────
+    selected_mask = edited["Apply"].values
+    selected_ids  = {df["_id"].iloc[i] for i, sel in enumerate(selected_mask) if sel}
+
+    if any(selected_mask):
+        st.markdown("#### Detail — Selected Recommendations")
+        for i, (sel, row) in enumerate(zip(selected_mask, table_data)):
+            if not sel:
+                continue
+            pri   = row["Priority"]
+            color = PRIORITY_COLOR.get(pri, "#64748b")
+            bg    = PRIORITY_BG.get(pri, "#f8fafc")
+            st.markdown(
+                f'<div style="background:{bg};border-left:4px solid {color};'
+                f'border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:10px">'
+                f'<div style="font-weight:700;color:{color};font-size:.78em;'
+                f'text-transform:uppercase;letter-spacing:.8px">'
+                f'{row["Priority"]} · {row["Category"]}</div>'
+                f'<div style="font-weight:700;color:#0f172a;margin:3px 0 6px">{row["Strategy"]}</div>'
+                f'<div style="font-size:.82em;color:#475569;line-height:1.65">{row["_detail"]}</div>'
+                f'<div style="font-size:.75em;color:#94a3b8;margin-top:6px"><b>Note:</b> {row["_note"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Projected savings summary ─────────────────────────────────────────────
+    st.markdown("### Projected Tax Savings")
+
+    proj = optimizer.projected_tax(selected_ids)
+
+    ps1, ps2, ps3, ps4, ps5 = st.columns(5)
+    with ps1:
+        st.markdown(_tax_card(
+            "Current Fed. Tax", f"${cur['federal_tax']:,.0f}",
+            f"Taxable: ${cur['taxable_income']:,.0f}", "#991b1b"
+        ), unsafe_allow_html=True)
+    with ps2:
+        st.markdown(_tax_card(
+            "Projected Fed. Tax", f"${proj['proj_fed_tax']:,.0f}",
+            f"Taxable: ${proj['proj_taxable']:,.0f}",
+            "#065f46" if proj["proj_fed_tax"] < cur["federal_tax"] else "#991b1b"
+        ), unsafe_allow_html=True)
+    with ps3:
+        st.markdown(_tax_card(
+            "Federal Tax Saved", f"${proj['fed_saving']:,.0f}",
+            f"{proj['fed_saving']/max(cur['federal_tax'],1)*100:.1f}% reduction",
+            "#065f46"
+        ), unsafe_allow_html=True)
+    with ps4:
+        st.markdown(_tax_card(
+            "FICA Saved", f"${proj['fica_saving']:,.0f}",
+            "SS + Medicare",
+            "#0d7c4e"
+        ), unsafe_allow_html=True)
+    with ps5:
+        st.markdown(_tax_card(
+            "Total Est. Savings", f"${proj['total_saving']:,.0f}",
+            "Federal + FICA combined",
+            "#003087"
+        ), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Current vs Recommended side-by-side ──────────────────────────────────
+    st.markdown("#### Current vs. Recommended — Tax Waterfall")
+    comp_rows = [
+        ("Gross Income",          cur["gross_income"],      cur["gross_income"],      False),
+        ("Above-the-Line Deductions", cur["above_the_line"],
+         cur["above_the_line"] + proj["additional_deductions"], True),
+        ("Adjusted Gross Income", cur["current_agi"],        proj["proj_agi"],         True),
+        (f"{cur['deduction_type']} Deduction", cur["deduction_amount"],
+         cur["deduction_amount"], False),
+        ("Taxable Income",        cur["taxable_income"],     proj["proj_taxable"],     True),
+        ("Federal Income Tax",    cur["federal_tax"],        proj["proj_fed_tax"],     True),
+        ("Marginal Rate",         cur["marginal_rate"],      proj["proj_marginal"],    True),
+        ("Effective Rate",        cur["effective_rate"],     proj["proj_effective"],   True),
+    ]
+
+    def _is_rate(label):
+        return "Rate" in label
+
+    rows_html = ""
+    for label, current_val, projected_val, lower_is_better in comp_rows:
+        is_rate = _is_rate(label)
+        if is_rate:
+            cv = f"{current_val*100:.1f}%"
+            pv = f"{projected_val*100:.1f}%"
+        else:
+            cv = f"${current_val:,.0f}"
+            pv = f"${projected_val:,.0f}"
+
+        diff = projected_val - current_val
+        if diff == 0 or not lower_is_better and diff == 0:
+            arrow = ""
+            diff_style = "color:#64748b"
+        elif lower_is_better and diff < 0:
+            arrow = "▼ "
+            diff_style = "color:#065f46;font-weight:700"
+        elif not lower_is_better and diff > 0:
+            arrow = "▲ "
+            diff_style = "color:#065f46;font-weight:700"
+        else:
+            arrow = ("▼ " if diff < 0 else "▲ ")
+            diff_style = "color:#991b1b;font-weight:700"
+
+        if is_rate:
+            diff_str = f"{arrow}{abs(diff)*100:.1f}pp"
+        else:
+            diff_str = f"{arrow}${abs(diff):,.0f}"
+
+        rows_html += (
+            f"<tr>"
+            f"<td style='padding:9px 14px;font-weight:600;color:#1a202c;font-size:.84em'>{label}</td>"
+            f"<td style='padding:9px 14px;text-align:right;font-family:SF Mono,Fira Code,monospace;"
+            f"font-weight:700;color:#991b1b;font-size:.9em'>{cv}</td>"
+            f"<td style='padding:9px 14px;text-align:right;font-family:SF Mono,Fira Code,monospace;"
+            f"font-weight:700;color:#065f46;font-size:.9em'>{pv}</td>"
+            f"<td style='padding:9px 14px;text-align:right;font-size:.82em;{diff_style}'>{diff_str}</td>"
+            f"</tr>"
+        )
+
+    st.markdown(f"""
+    <div class="comp-wrap">
+    <table class="comp-table" style="font-size:.84em">
+      <thead>
+        <tr>
+          <th style="text-align:left">Line Item</th>
+          <th style="text-align:right">Current</th>
+          <th style="text-align:right">With Recommendations</th>
+          <th style="text-align:right">Change</th>
+        </tr>
+      </thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="disclaimer">
+    <b>Disclaimer:</b> Estimates are based on 2025 federal income tax rules (IRS Rev. Proc. 2024-40).
+    State and local taxes, AMT, phase-outs, and other individual circumstances are not fully modelled.
+    Actual tax savings will vary. FICA savings shown for strategies that reduce payroll-deductible income.
+    This tool is for <b>educational and planning purposes only</b> — it does not constitute tax,
+    legal, or financial advice. Consult a licensed CPA or tax professional before implementing
+    any strategy.
+    </div>""", unsafe_allow_html=True)
+
+
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 def main():
     _init_session()
     mode, tickers, go_btn = _sidebar()
 
-    # Portfolio Builder is self-contained (own form + button inside)
+    # Self-contained modes (own forms, no ticker needed)
     if "Portfolio" in mode:
         render_portfolio_builder()
+        return
+
+    if "Tax" in mode:
+        render_tax_optimizer()
         return
 
     if not go_btn or not any(t.strip() for t in tickers):
