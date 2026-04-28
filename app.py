@@ -1854,103 +1854,346 @@ def render_tax_optimizer():
       </div>
     </div>""", unsafe_allow_html=True)
 
+    # ── Example scenario notice ───────────────────────────────────────────────
+    st.markdown("""
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;
+                padding:12px 16px;margin-bottom:16px;font-size:.83em;color:#78350f">
+      <b>Example pre-filled:</b> A married couple earning <b>$350,000 combined</b> —
+      contributing to their 401(k) but well below the legal limit, not using a
+      Dependent Care FSA despite having two children, and missing several other
+      tax-saving vehicles. Adjust any field to match your own situation.
+    </div>""", unsafe_allow_html=True)
+
     # ── Input form ────────────────────────────────────────────────────────────
     with st.form("tax_form"):
 
-        # Section A — W-2 & Household
-        st.markdown("#### W-2 Information & Household")
-        st.caption("Enter figures from your most recent W-2. For married filing jointly, enter combined figures where indicated.")
+        # ── Section A: W-2 & Household ────────────────────────────────────────
+        st.markdown("#### Section A — Income & Household")
+        st.caption(
+            "Pull these numbers directly from your W-2 form(s). "
+            "No names, Social Security numbers, or employer details are needed."
+        )
 
         a1, a2, a3 = st.columns(3)
         with a1:
-            w2_box1      = st.number_input("W-2 Box 1 — Wages (primary)", min_value=0.0,
-                                            value=150_000.0, step=1_000.0, format="%.0f",
-                                            help="Wages, Tips, Other Compensation (after pre-tax 401k/HSA deductions)")
-            w2_box12_ret = st.number_input("Box 12 — Retirement contributions (D/E/S)",
-                                            min_value=0.0, value=10_000.0, step=500.0, format="%.0f",
-                                            help="Code D=401k, E=403b, S=SIMPLE IRA. Current annual contribution.")
+            w2_box1 = st.number_input(
+                "W-2 Box 1 — Your wages (primary earner)",
+                min_value=0.0, value=220_000.0, step=1_000.0, format="%.0f",
+                help=(
+                    "The biggest number on your W-2 — your total pay for the year. "
+                    "This is AFTER your employer already subtracted your 401(k) and "
+                    "health insurance premiums, so it's less than your actual salary. "
+                    "Example: if your salary is $230,000 and you put $10,000 into a 401(k), "
+                    "Box 1 shows $220,000."
+                ),
+            )
+            w2_box12_ret = st.number_input(
+                "Box 12 — How much you put into your retirement plan this year",
+                min_value=0.0, value=10_000.0, step=500.0, format="%.0f",
+                help=(
+                    "Find this in Box 12 of your W-2. Look for a letter code next to a dollar amount: "
+                    "D = 401(k), E = 403(b), S = SIMPLE IRA. "
+                    "Enter that dollar amount here. "
+                    "The 2025 maximum you're allowed to contribute is $23,500 "
+                    "(or $31,000 if you're 50 or older). "
+                    "If you don't have a retirement plan at work, enter 0."
+                ),
+            )
         with a2:
-            w2_box2      = st.number_input("W-2 Box 2 — Federal tax withheld", min_value=0.0,
-                                            value=30_000.0, step=500.0, format="%.0f")
-            w2_box12_hsa = st.number_input("Box 12 W — HSA (employer + payroll)",
-                                            min_value=0.0, value=0.0, step=100.0, format="%.0f",
-                                            help="Total HSA contributions via payroll (employer + employee, Code W)")
+            w2_box2 = st.number_input(
+                "W-2 Box 2 — Federal taxes already withheld",
+                min_value=0.0, value=62_000.0, step=500.0, format="%.0f",
+                help=(
+                    "How much federal income tax your employer sent to the IRS on your behalf "
+                    "throughout the year — taken out of each paycheck automatically. "
+                    "Find this in Box 2 of your W-2. "
+                    "We compare this to your actual tax bill to estimate your refund or amount owed."
+                ),
+            )
+            w2_box12_hsa = st.number_input(
+                "Box 12 W — Health Savings Account via paycheck",
+                min_value=0.0, value=0.0, step=100.0, format="%.0f",
+                help=(
+                    "If your employer offers an HSA and money comes out of your paycheck for it, "
+                    "find code W in Box 12 of your W-2 and enter that amount. "
+                    "An HSA is a special savings account for medical costs — contributions are "
+                    "100% tax-free. Enter 0 if you don't have an HSA."
+                ),
+            )
         with a3:
-            filing_status = st.selectbox("Filing Status",
+            filing_status = st.selectbox(
+                "How you file your taxes",
                 ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"],
-                index=1)
-            age = st.number_input("Your Age", min_value=18, max_value=99, value=42, step=1)
+                index=1,
+                help=(
+                    "Single: unmarried. "
+                    "Married Filing Jointly: married and filing one combined return (most common, usually saves the most tax). "
+                    "Head of Household: unmarried but supporting a child or dependent. "
+                    "Married Filing Separately: rare — usually results in higher taxes."
+                ),
+            )
+            age = st.number_input(
+                "Your age",
+                min_value=18, max_value=99, value=45, step=1,
+                help=(
+                    "Your age as of Dec 31, 2025. "
+                    "Age matters because the IRS allows higher contribution limits once you turn 50 "
+                    "(called 'catch-up contributions') — up to $7,500 extra in a 401(k) and $1,000 extra in an IRA."
+                ),
+            )
 
         b1, b2, b3 = st.columns(3)
         with b1:
-            spouse_w2    = st.number_input("Spouse W-2 Box 1 (if MFJ)", min_value=0.0,
-                                            value=0.0, step=1_000.0, format="%.0f")
-            spouse_age   = st.number_input("Spouse Age (if MFJ)", min_value=0, max_value=99, value=0, step=1)
+            spouse_w2 = st.number_input(
+                "Spouse's W-2 Box 1 wages (if filing jointly)",
+                min_value=0.0, value=130_000.0, step=1_000.0, format="%.0f",
+                help=(
+                    "If you're married and filing jointly, enter your spouse's wages from their W-2 Box 1. "
+                    "Enter 0 if your spouse doesn't have a W-2 income (or if you're not filing jointly). "
+                    "This is used to calculate your combined household income."
+                ),
+            )
+            spouse_age = st.number_input(
+                "Spouse's age",
+                min_value=0, max_value=99, value=43, step=1,
+                help="Spouse's age as of Dec 31, 2025. Used to check if they qualify for catch-up contributions.",
+            )
         with b2:
-            num_dep      = st.number_input("Number of Dependents", min_value=0, max_value=10, value=2, step=1)
-            plan_type    = st.selectbox("Employer Retirement Plan Type",
-                                        ["401(k)", "403(b)", "SIMPLE IRA", "None"])
+            num_dep = st.number_input(
+                "Number of children / dependents",
+                min_value=0, max_value=10, value=2, step=1,
+                help=(
+                    "How many children or other dependents you support. "
+                    "This unlocks important tax-saving options like the Dependent Care FSA "
+                    "(pay for daycare with pre-tax dollars) and child-related tax credits."
+                ),
+            )
+            plan_type = st.selectbox(
+                "Retirement plan offered by your employer",
+                ["401(k)", "403(b)", "SIMPLE IRA", "None"],
+                help=(
+                    "401(k): offered by most private companies. "
+                    "403(b): common at schools, hospitals, and nonprofits. "
+                    "SIMPLE IRA: smaller businesses (under 100 employees). "
+                    "None: self-employed, part-time, or employer doesn't offer one."
+                ),
+            )
         with b3:
             has_workplace = plan_type != "None"
-            st.markdown("<br>", unsafe_allow_html=True)
-            has_hdhp     = st.checkbox("Enrolled in High-Deductible Health Plan (HDHP)",
-                                        value=False, help="Required for HSA eligibility")
-            hsa_coverage = st.selectbox("HSA Coverage Type",
-                                        ["None", "Self", "Family"],
-                                        index=0 if not has_hdhp else 2)
+            st.markdown(
+                '<div style="font-size:.78em;font-weight:600;color:#374151;margin-bottom:4px">'
+                'Health plan type</div>',
+                unsafe_allow_html=True,
+            )
+            has_hdhp = st.checkbox(
+                "I have a High-Deductible Health Plan (HDHP)",
+                value=False,
+                help=(
+                    "An HDHP is a health insurance plan with a higher deductible "
+                    "but lower premiums — and it's the only type that lets you open an HSA. "
+                    "In 2025, a plan qualifies if the annual deductible is at least $1,650 "
+                    "(self) or $3,300 (family). Check your insurance card or benefits portal. "
+                    "If you're on a PPO or HMO, leave this unchecked."
+                ),
+            )
+            hsa_coverage = st.selectbox(
+                "Who does your health plan cover?",
+                ["None", "Self only", "Family"],
+                index=0,
+                help=(
+                    "Self only: the plan covers just you. "
+                    "Family: covers you plus a spouse and/or children. "
+                    "This determines your HSA contribution limit "
+                    "($4,300 self / $8,550 family in 2025). "
+                    "Select 'None' if you don't have an HDHP."
+                ),
+            )
+            # Normalise to the values tax_optimizer expects
+            if hsa_coverage == "Self only":
+                hsa_coverage = "Self"
 
         st.markdown("---")
 
-        # Section B — Current Tax-Advantaged Accounts
-        st.markdown("#### Current Tax-Advantaged Account Contributions (this year)")
+        # ── Section B: Current Tax-Advantaged Accounts ────────────────────────
+        st.markdown("#### Section B — Tax-Advantaged Accounts You're Currently Using")
+        st.caption(
+            "These are special accounts where the government lets you save money "
+            "before paying taxes — or where your money grows tax-free. "
+            "Enter what you have actually contributed so far this year. Enter 0 if you're not using an account."
+        )
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            cur_ira_trad = st.number_input("Traditional IRA", min_value=0.0, value=0.0,
-                                            step=500.0, format="%.0f")
-            cur_fsa_health = st.number_input("Healthcare FSA", min_value=0.0, value=0.0,
-                                              step=100.0, format="%.0f")
+            cur_ira_trad = st.number_input(
+                "Traditional IRA contributions",
+                min_value=0.0, value=0.0, step=500.0, format="%.0f",
+                help=(
+                    "An IRA (Individual Retirement Account) is a retirement savings account "
+                    "you open yourself — separate from your job's 401(k). "
+                    "With a Traditional IRA, your contribution may reduce your taxable income NOW. "
+                    "2025 limit: $7,000 ($8,000 if age 50+). "
+                    "Enter what you've contributed this year, or 0 if you haven't opened one."
+                ),
+            )
+            cur_fsa_health = st.number_input(
+                "Healthcare FSA contributions",
+                min_value=0.0, value=600.0, step=100.0, format="%.0f",
+                help=(
+                    "A Healthcare FSA (Flexible Spending Account) lets you set aside "
+                    "pre-tax money for medical, dental, and vision bills — doctor copays, "
+                    "prescriptions, glasses, etc. "
+                    "The money comes out of your paycheck before taxes are calculated. "
+                    "2025 limit: $3,300. "
+                    "Caution: most FSA funds expire at year-end ('use it or lose it'). "
+                    "Check your benefits portal for your current balance."
+                ),
+            )
         with c2:
-            cur_ira_roth = st.number_input("Roth IRA", min_value=0.0, value=0.0,
-                                            step=500.0, format="%.0f")
-            cur_fsa_dep  = st.number_input("Dependent Care FSA", min_value=0.0, value=0.0,
-                                            step=100.0, format="%.0f")
+            cur_ira_roth = st.number_input(
+                "Roth IRA contributions",
+                min_value=0.0, value=0.0, step=500.0, format="%.0f",
+                help=(
+                    "A Roth IRA is similar to a Traditional IRA but works in reverse: "
+                    "you contribute after-tax money now, and ALL future growth and withdrawals "
+                    "are completely tax-free in retirement. "
+                    "At $350,000 household income, you may be over the income limit to contribute "
+                    "directly ($246,000 for MFJ) — but a 'Backdoor Roth' strategy may still be available. "
+                    "Enter 0 if you haven't contributed."
+                ),
+            )
+            cur_fsa_dep = st.number_input(
+                "Dependent Care FSA contributions",
+                min_value=0.0, value=0.0, step=100.0, format="%.0f",
+                help=(
+                    "A Dependent Care FSA lets you pay for childcare — daycare, after-school programs, "
+                    "summer day camp — with pre-tax dollars. "
+                    "If you have children under 13, this is one of the most overlooked tax savings. "
+                    "2025 limit: $5,000 per household. "
+                    "Enter what you've set aside this year, or 0 if you're not using it."
+                ),
+            )
         with c3:
-            cur_hsa_self = st.number_input("HSA (outside payroll)", min_value=0.0,
-                                            value=0.0, step=100.0, format="%.0f")
-            cur_529      = st.number_input("529 Education (this year)", min_value=0.0,
-                                            value=0.0, step=500.0, format="%.0f")
+            cur_hsa_self = st.number_input(
+                "HSA contributions made outside your paycheck",
+                min_value=0.0, value=0.0, step=100.0, format="%.0f",
+                help=(
+                    "If you have an HSA (Health Savings Account) and you contributed directly "
+                    "to it — not through your paycheck — enter that amount here. "
+                    "HSA contributions via paycheck are already captured in Box 12 W above. "
+                    "Most people contribute only through payroll, so this is often 0."
+                ),
+            )
+            cur_529 = st.number_input(
+                "529 Education Plan contributions this year",
+                min_value=0.0, value=2_000.0, step=500.0, format="%.0f",
+                help=(
+                    "A 529 plan is a tax-advantaged savings account for education costs "
+                    "(college, K-12 tuition, trade school). "
+                    "No federal tax deduction, but money grows tax-free and withdrawals for "
+                    "education are tax-free. Many states also give a state income tax deduction. "
+                    "Enter how much you've contributed this year across all 529 accounts."
+                ),
+            )
         with c4:
-            invest_inc   = st.number_input("Investment Income (dividends + cap gains)",
-                                            min_value=0.0, value=0.0, step=500.0, format="%.0f")
-            other_inc    = st.number_input("Other Income (freelance, rental, etc.)",
-                                            min_value=0.0, value=0.0, step=500.0, format="%.0f")
+            invest_inc = st.number_input(
+                "Investment income (dividends + capital gains)",
+                min_value=0.0, value=8_500.0, step=500.0, format="%.0f",
+                help=(
+                    "Money earned from investments outside of your retirement accounts — "
+                    "stock dividends, interest from bonds, or profits from selling investments "
+                    "(capital gains). "
+                    "Find this on your 1099-DIV and 1099-B tax forms. "
+                    "At higher incomes, this can trigger an extra 3.8% Net Investment Income Tax (NIIT). "
+                    "Enter 0 if you don't have a taxable brokerage account."
+                ),
+            )
+            other_inc = st.number_input(
+                "Other income (freelance, rental, side business, etc.)",
+                min_value=0.0, value=5_000.0, step=500.0, format="%.0f",
+                help=(
+                    "Any income not captured in your W-2 — freelance or consulting fees, "
+                    "rental income from a property you own, income from a side business, "
+                    "alimony received (pre-2019 divorces), etc. "
+                    "You'd typically find this on a 1099-NEC or 1099-MISC. "
+                    "Enter 0 if all your income comes from a regular job."
+                ),
+            )
 
         st.markdown("---")
 
-        # Section C — Itemized Deductions
-        st.markdown("#### Itemized Deductions (leave 0 if not applicable)")
+        # ── Section C: Itemized Deductions ───────────────────────────────────
+        st.markdown("#### Section C — Potential Itemized Deductions")
+        st.caption(
+            "The IRS lets you either take a flat 'standard deduction' ($30,000 for married couples in 2025) "
+            "OR list out your actual deductible expenses — whichever is larger. "
+            "Enter your actual expenses below. If your total is below $30,000, the app will use the standard deduction automatically."
+        )
 
         d1, d2, d3, d4 = st.columns(4)
         with d1:
-            mortgage_int = st.number_input("Mortgage Interest Paid", min_value=0.0,
-                                            value=0.0, step=500.0, format="%.0f")
+            mortgage_int = st.number_input(
+                "Mortgage interest paid this year",
+                min_value=0.0, value=18_500.0, step=500.0, format="%.0f",
+                help=(
+                    "The interest portion of your monthly mortgage payments — not the principal. "
+                    "Your lender sends a Form 1098 each January showing the exact amount. "
+                    "This is usually the largest itemized deduction for homeowners. "
+                    "Enter 0 if you rent or have a paid-off home."
+                ),
+            )
         with d2:
-            char_cash    = st.number_input("Charitable Donations (cash)", min_value=0.0,
-                                            value=0.0, step=100.0, format="%.0f")
-            char_noncash = st.number_input("Charitable Donations (non-cash / appreciated)",
-                                            min_value=0.0, value=0.0, step=100.0, format="%.0f")
+            char_cash = st.number_input(
+                "Cash donations to charity",
+                min_value=0.0, value=4_000.0, step=100.0, format="%.0f",
+                help=(
+                    "Money you gave to qualified nonprofits, religious organisations, "
+                    "or other IRS-approved charities — by check, credit card, or online. "
+                    "You need a receipt or bank record for donations of $250 or more. "
+                    "GoFundMe donations are generally NOT deductible."
+                ),
+            )
+            char_noncash = st.number_input(
+                "Non-cash / property donations to charity",
+                min_value=0.0, value=0.0, step=100.0, format="%.0f",
+                help=(
+                    "The fair market value of items you donated — clothing, furniture, electronics, "
+                    "or stock/investments given directly to a charity. "
+                    "Donating appreciated stocks is especially powerful: you get a deduction for "
+                    "the full current value AND avoid paying capital gains tax on the gain. "
+                    "Enter 0 if you only made cash donations."
+                ),
+            )
         with d3:
-            state_taxes  = st.number_input("State & Local Taxes Paid (actual amount)",
-                                            min_value=0.0, value=0.0, step=500.0, format="%.0f",
-                                            help="Income + property taxes. Capped at $10,000 for federal deduction.")
+            state_taxes = st.number_input(
+                "State & local taxes paid (actual total)",
+                min_value=0.0, value=32_000.0, step=500.0, format="%.0f",
+                help=(
+                    "The total state income taxes and local property taxes you paid this year. "
+                    "IMPORTANT: the federal government only lets you deduct a maximum of $10,000 "
+                    "of state/local taxes — no matter how much you actually paid. "
+                    "Enter your REAL total here and we'll apply the $10,000 cap automatically. "
+                    "High-tax state residents (CA, NY, NJ, IL) often feel this cap acutely."
+                ),
+            )
         with d4:
-            other_item   = st.number_input("Other Itemized (medical >7.5% AGI, etc.)",
-                                            min_value=0.0, value=0.0, step=100.0, format="%.0f")
+            other_item = st.number_input(
+                "Other itemized deductions",
+                min_value=0.0, value=1_500.0, step=100.0, format="%.0f",
+                help=(
+                    "Any remaining deductible expenses that don't fit above — most commonly: "
+                    "out-of-pocket medical and dental expenses that exceed 7.5% of your income "
+                    "(e.g., major surgery, long-term care costs). "
+                    "Also includes gambling losses up to winnings, casualty losses from "
+                    "federally declared disasters, etc. "
+                    "Most people enter 0 here."
+                ),
+            )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        submitted = st.form_submit_button("Analyze & Generate Recommendations",
-                                          type="primary", use_container_width=True)
+        submitted = st.form_submit_button(
+            "Analyze My Tax Situation & Generate Recommendations",
+            type="primary", use_container_width=True,
+        )
 
     if not submitted:
         # Show quick reference bracket card while waiting
