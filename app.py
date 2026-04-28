@@ -2195,8 +2195,31 @@ def render_tax_optimizer():
             type="primary", use_container_width=True,
         )
 
-    if not submitted:
-        # Show quick reference bracket card while waiting
+    # ── Persist form inputs so checkbox toggles don't reset results ──────────
+    # st.form_submit_button returns True for exactly ONE rerun after clicking.
+    # All subsequent reruns (e.g. toggling a checkbox) have submitted=False.
+    # We store every input in session_state on submit so the results section
+    # can rebuild the optimizer on every rerun without re-submitting the form.
+    if submitted:
+        st.session_state["_tax_inputs"] = dict(
+            w2_box1=w2_box1, w2_box2=w2_box2,
+            w2_box12_ret=w2_box12_ret, w2_box12_hsa=w2_box12_hsa,
+            filing_status=filing_status, age=int(age),
+            spouse_w2=spouse_w2, spouse_age=int(spouse_age),
+            num_dep=int(num_dep), plan_type=plan_type,
+            has_workplace=plan_type != "None", has_hdhp=has_hdhp,
+            hsa_coverage=hsa_coverage,
+            cur_ira_trad=cur_ira_trad, cur_ira_roth=cur_ira_roth,
+            cur_hsa_self=cur_hsa_self, cur_fsa_health=cur_fsa_health,
+            cur_fsa_dep=cur_fsa_dep, cur_529=cur_529,
+            invest_inc=invest_inc, other_inc=other_inc,
+            mortgage_int=mortgage_int, char_cash=char_cash,
+            char_noncash=char_noncash, state_taxes=state_taxes,
+            other_item=other_item,
+        )
+
+    # Nothing analysed yet — show placeholder
+    if "_tax_inputs" not in st.session_state:
         st.markdown("---")
         st.markdown("#### 2025 Federal Tax Brackets (Quick Reference)")
         fs_ref = "Married Filing Jointly"
@@ -2219,35 +2242,45 @@ def render_tax_optimizer():
         </div>""", unsafe_allow_html=True)
         return
 
+    # ── Load inputs from session state ────────────────────────────────────────
+    inp = st.session_state["_tax_inputs"]
+
+    # "Edit Inputs" button clears session state and returns to form
+    col_hdr, col_btn = st.columns([5, 1])
+    with col_btn:
+        if st.button("Edit Inputs", type="secondary", use_container_width=True):
+            del st.session_state["_tax_inputs"]
+            st.rerun()
+
     # ── Build optimizer ───────────────────────────────────────────────────────
     try:
         optimizer = TaxOptimizer(
-            w2_box1=w2_box1,
-            w2_box2=w2_box2,
-            w2_box12_retirement=w2_box12_ret,
-            w2_box12_hsa=w2_box12_hsa,
-            filing_status=filing_status,
-            age=int(age),
-            spouse_age=int(spouse_age),
-            spouse_w2_box1=spouse_w2,
-            num_dependents=int(num_dep),
-            current_ira_trad=cur_ira_trad,
-            current_ira_roth=cur_ira_roth,
-            current_hsa_self=cur_hsa_self,
-            hsa_coverage=hsa_coverage,
-            current_fsa_health=cur_fsa_health,
-            current_fsa_dep=cur_fsa_dep,
-            current_529=cur_529,
-            investment_income=invest_inc,
-            other_income=other_inc,
-            mortgage_interest=mortgage_int,
-            charitable_cash=char_cash,
-            charitable_noncash=char_noncash,
-            state_local_taxes=state_taxes,
-            other_itemized=other_item,
-            has_workplace_plan=has_workplace,
-            plan_type=plan_type,
-            has_hdhp=has_hdhp,
+            w2_box1=inp["w2_box1"],
+            w2_box2=inp["w2_box2"],
+            w2_box12_retirement=inp["w2_box12_ret"],
+            w2_box12_hsa=inp["w2_box12_hsa"],
+            filing_status=inp["filing_status"],
+            age=inp["age"],
+            spouse_age=inp["spouse_age"],
+            spouse_w2_box1=inp["spouse_w2"],
+            num_dependents=inp["num_dep"],
+            current_ira_trad=inp["cur_ira_trad"],
+            current_ira_roth=inp["cur_ira_roth"],
+            current_hsa_self=inp["cur_hsa_self"],
+            hsa_coverage=inp["hsa_coverage"],
+            current_fsa_health=inp["cur_fsa_health"],
+            current_fsa_dep=inp["cur_fsa_dep"],
+            current_529=inp["cur_529"],
+            investment_income=inp["invest_inc"],
+            other_income=inp["other_inc"],
+            mortgage_interest=inp["mortgage_int"],
+            charitable_cash=inp["char_cash"],
+            charitable_noncash=inp["char_noncash"],
+            state_local_taxes=inp["state_taxes"],
+            other_itemized=inp["other_item"],
+            has_workplace_plan=inp["has_workplace"],
+            plan_type=inp["plan_type"],
+            has_hdhp=inp["has_hdhp"],
         )
     except Exception as e:
         st.error(f"Could not compute tax analysis: {e}")
@@ -2305,22 +2338,28 @@ def render_tax_optimizer():
     PRIORITY_COLOR = {"High": "#065f46", "Medium": "#1a56db", "Low": "#64748b"}
     PRIORITY_BG    = {"High": "#d1fae5", "Medium": "#dbeafe", "Low": "#f1f5f9"}
 
-    # Build display dataframe
+    def _fd(v):
+        """Format a dollar value for display in the table."""
+        return f"${v:,.0f}" if v else "—"
+
+    # Build display dataframe — dollar columns pre-formatted as strings so
+    # Python's comma-number formatting is used (Streamlit's NumberColumn format
+    # parameter uses C printf style which does not support comma separators).
     table_data = []
     for r in recs:
         table_data.append({
-            "Apply":                True,
-            "Priority":             r["priority"],
-            "Category":             r["category"],
-            "Strategy":             r["strategy"],
-            "Current ($)":          r["current"],
-            "Recommended ($)":      r["recommended"],
-            "Added Deduction ($)":  r["deduction"],
-            "Est. Federal Saving":  r["fed_saving"],
-            "FICA Saving":          r["fica_saving"],
-            "_id":                  r["id"],
-            "_detail":              r["detail"],
-            "_note":                r["note"],
+            "Apply":            True,
+            "Priority":         r["priority"],
+            "Category":         r["category"],
+            "Strategy":         r["strategy"],
+            "Current":          _fd(r["current"]),
+            "Recommended":      _fd(r["recommended"]),
+            "Deduction Added":  _fd(r["deduction"]),
+            "Fed Tax Saving":   _fd(r["fed_saving"]),
+            "FICA Saving":      _fd(r["fica_saving"]),
+            "_id":              r["id"],
+            "_detail":          r["detail"],
+            "_note":            r["note"],
         })
 
     df = pd.DataFrame(table_data)
@@ -2329,32 +2368,39 @@ def render_tax_optimizer():
         df.drop(columns=["_id", "_detail", "_note"]),
         column_config={
             "Apply": st.column_config.CheckboxColumn(
-                "Apply", default=True, width="small",
-                help="Toggle to include/exclude this recommendation"
+                "Apply",
+                default=True,
+                help="Check to include this strategy in your projected savings",
             ),
-            "Priority": st.column_config.TextColumn("Priority", width="small"),
-            "Category": st.column_config.TextColumn("Category", width="medium"),
-            "Strategy": st.column_config.TextColumn("Strategy", width="large"),
-            "Current ($)": st.column_config.NumberColumn(
-                "Current ($)", format="$%,.0f", width="small"),
-            "Recommended ($)": st.column_config.NumberColumn(
-                "Recommended ($)", format="$%,.0f", width="small"),
-            "Added Deduction ($)": st.column_config.NumberColumn(
-                "Added Deduction ($)", format="$%,.0f", width="small",
-                help="Additional pre-tax deduction from this action"),
-            "Est. Federal Saving": st.column_config.NumberColumn(
-                "Est. Fed. Saving ($)", format="$%,.0f", width="small"),
-            "FICA Saving": st.column_config.NumberColumn(
-                "FICA Saving ($)", format="$%,.0f", width="small",
-                help="Social Security + Medicare tax savings (payroll deduction strategies only)"),
+            "Priority":        st.column_config.TextColumn("Priority"),
+            "Category":        st.column_config.TextColumn("Category"),
+            "Strategy":        st.column_config.TextColumn("Strategy"),
+            "Current":         st.column_config.TextColumn(
+                                   "Current ($)",
+                                   help="What you are contributing / deducting today"),
+            "Recommended":     st.column_config.TextColumn(
+                                   "Recommended ($)",
+                                   help="What you could contribute / deduct at the maximum allowed"),
+            "Deduction Added": st.column_config.TextColumn(
+                                   "Added Deduction ($)",
+                                   help="Extra pre-tax deduction if you adopt this strategy"),
+            "Fed Tax Saving":  st.column_config.TextColumn(
+                                   "Est. Fed. Tax Saving",
+                                   help="Estimated federal income tax reduction at your marginal rate"),
+            "FICA Saving":     st.column_config.TextColumn(
+                                   "FICA Saving",
+                                   help="SS + Medicare savings (applies to payroll-based strategies only)"),
         },
         use_container_width=True,
         hide_index=True,
+        disabled=["Priority", "Category", "Strategy",
+                  "Current", "Recommended", "Deduction Added",
+                  "Fed Tax Saving", "FICA Saving"],
         key="tax_rec_table",
     )
 
     # ── Per-item detail cards (selected items only) ───────────────────────────
-    selected_mask = edited["Apply"].values
+    selected_mask = edited["Apply"].tolist()
     selected_ids  = {df["_id"].iloc[i] for i, sel in enumerate(selected_mask) if sel}
 
     if any(selected_mask):
