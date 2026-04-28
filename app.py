@@ -1869,9 +1869,13 @@ def render_tax_optimizer():
 
         # ── Section A: W-2 & Household ────────────────────────────────────────
         st.markdown("#### Section A — Income & Household")
-        st.caption(
+        st.markdown(
+            "<p style='font-size:0.82em;color:#6b7280;line-height:1.6;"
+            "word-wrap:break-word;overflow-wrap:anywhere;margin-bottom:8px'>"
             "Pull these numbers directly from your W-2 form(s). "
             "No names, Social Security numbers, or employer details are needed."
+            "</p>",
+            unsafe_allow_html=True,
         )
 
         a1, a2, a3 = st.columns(3)
@@ -2016,10 +2020,14 @@ def render_tax_optimizer():
 
         # ── Section B: Current Tax-Advantaged Accounts ────────────────────────
         st.markdown("#### Section B — Tax-Advantaged Accounts You're Currently Using")
-        st.caption(
+        st.markdown(
+            "<p style='font-size:0.82em;color:#6b7280;line-height:1.6;"
+            "word-wrap:break-word;overflow-wrap:anywhere;margin-bottom:8px'>"
             "These are special accounts where the government lets you save money "
             "before paying taxes — or where your money grows tax-free. "
-            "Enter what you have actually contributed so far this year. Enter 0 if you're not using an account."
+            "Enter what you have contributed so far this year. Enter 0 if you are not using an account."
+            "</p>",
+            unsafe_allow_html=True,
         )
 
         c1, c2, c3, c4 = st.columns(4)
@@ -2123,10 +2131,16 @@ def render_tax_optimizer():
 
         # ── Section C: Itemized Deductions ───────────────────────────────────
         st.markdown("#### Section C — Potential Itemized Deductions")
-        st.caption(
-            "The IRS lets you either take a flat 'standard deduction' ($30,000 for married couples in 2025) "
-            "OR list out your actual deductible expenses — whichever is larger. "
-            "Enter your actual expenses below. If your total is below $30,000, the app will use the standard deduction automatically."
+        st.markdown(
+            "<p style='font-size:0.82em;color:#6b7280;line-height:1.6;"
+            "word-wrap:break-word;overflow-wrap:anywhere;margin-bottom:8px'>"
+            "The IRS lets you either take a flat <b>standard deduction</b> "
+            "($30,000 for married couples in 2025) "
+            "<em>or</em> list your actual deductible expenses — whichever is larger. "
+            "Enter your real figures below; if the total is under $30,000 the app "
+            "will apply the standard deduction automatically."
+            "</p>",
+            unsafe_allow_html=True,
         )
 
         d1, d2, d3, d4 = st.columns(4)
@@ -2329,10 +2343,13 @@ def render_tax_optimizer():
 
     # ── Recommendation table ──────────────────────────────────────────────────
     st.markdown("### Recommendations — Select to Apply")
-    st.caption(
-        "Toggle the **Apply** checkbox on each row to include or exclude a recommendation. "
-        "The savings summary updates automatically based on your selection. "
-        "Rows highlighted in green have the highest impact."
+    st.markdown(
+        "<p style='font-size:0.82em;color:#6b7280;line-height:1.6;"
+        "word-wrap:break-word;overflow-wrap:anywhere;margin-bottom:8px'>"
+        "Toggle the <b>Apply</b> checkbox on each row to include or exclude a strategy. "
+        "The projected savings summary below updates automatically with your selection."
+        "</p>",
+        unsafe_allow_html=True,
     )
 
     PRIORITY_COLOR = {"High": "#065f46", "Medium": "#1a56db", "Low": "#64748b"}
